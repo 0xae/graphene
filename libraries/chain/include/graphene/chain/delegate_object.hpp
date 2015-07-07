@@ -18,6 +18,7 @@
 #pragma once
 #include <graphene/chain/asset.hpp>
 #include <graphene/db/object.hpp>
+#include <graphene/db/generic_index.hpp>
 
 namespace graphene { namespace chain {
    using namespace graphene::db;
@@ -33,7 +34,7 @@ namespace graphene { namespace chain {
     *  active delegates has control.
     *
     *  Delegates were separated into a separate object to make iterating over
-    *  the set of delegate easy. 
+    *  the set of delegate easy.
     */
    class delegate_object : public abstract_object<delegate_object>
    {
@@ -41,12 +42,25 @@ namespace graphene { namespace chain {
          static const uint8_t space_id = protocol_ids;
          static const uint8_t type_id  = delegate_object_type;
 
-         account_id_type                delegate_account;
-         vote_id_type                   vote_id;
+         account_id_type  delegate_account;
+         vote_id_type     vote_id;
+         string           url;
    };
 
+   struct by_account;
+   using delegate_multi_index_type = multi_index_container<
+      delegate_object,
+      indexed_by<
+         ordered_unique< tag<by_id>,
+            member<object, object_id_type, &object::id>
+         >,
+         hashed_unique< tag<by_account>,
+            member<delegate_object, account_id_type, &delegate_object::delegate_account>
+         >
+      >
+   >;
+   using delegate_index = generic_index<delegate_object, delegate_multi_index_type>;
 } } // graphene::chain
 
 FC_REFLECT_DERIVED( graphene::chain::delegate_object, (graphene::db::object),
-                    (delegate_account)
-                    (vote_id) )
+                    (delegate_account)(vote_id)(url) )

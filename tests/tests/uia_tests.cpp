@@ -24,7 +24,6 @@
 #include <graphene/chain/account_object.hpp>
 #include <graphene/chain/asset_object.hpp>
 #include <graphene/chain/delegate_object.hpp>
-#include <graphene/chain/key_object.hpp>
 
 #include <fc/crypto/digest.hpp>
 
@@ -50,7 +49,7 @@ BOOST_AUTO_TEST_CASE( create_advanced_uia )
       creator.common_options.core_exchange_rate = price({asset(2),asset(1,1)});
       creator.common_options.whitelist_authorities = creator.common_options.blacklist_authorities = {account_id_type()};
       trx.operations.push_back(std::move(creator));
-      db.push_transaction(trx, ~0);
+      PUSH_TX( db, trx, ~0 );
 
       const asset_object& test_asset = test_asset_id(db);
       BOOST_CHECK(test_asset.symbol == "ADVANCED");
@@ -70,6 +69,62 @@ BOOST_AUTO_TEST_CASE( create_advanced_uia )
    }
 }
 
+BOOST_AUTO_TEST_CASE( override_transfer_test )
+{ try {
+   ACTORS( (dan)(eric)(sam) );
+   const asset_object& advanced = create_user_issued_asset( "ADVANCED", sam, override_authority );
+   issue_uia( dan, advanced.amount( 1000 ) );
+   trx.validate();
+   db.push_transaction(trx, ~0);
+   trx.operations.clear();
+   BOOST_REQUIRE_EQUAL( get_balance( dan, advanced ), 1000 );
+
+   trx.operations.clear();
+   override_transfer_operation otrans{ asset(), advanced.issuer, dan.id, eric.id, advanced.amount(100) };
+   trx.operations.push_back(otrans);
+
+   BOOST_TEST_MESSAGE( "Require throwing without signature" );
+   BOOST_REQUIRE_THROW( PUSH_TX( db, trx, 0 ), fc::exception);
+   BOOST_TEST_MESSAGE( "Require throwing with dan's signature" );
+   trx.sign( dan_private_key );
+   BOOST_REQUIRE_THROW( PUSH_TX( db, trx, 0 ), fc::exception);
+   BOOST_TEST_MESSAGE( "Pass with issuer's signature" );
+   trx.signatures.clear();
+   trx.sign( sam_private_key );
+   PUSH_TX( db, trx, 0 );
+
+   BOOST_REQUIRE_EQUAL( get_balance( dan, advanced ), 900 );
+   BOOST_REQUIRE_EQUAL( get_balance( eric, advanced ), 100 );
+} FC_LOG_AND_RETHROW() }
+
+BOOST_AUTO_TEST_CASE( override_transfer_test2 )
+{ try {
+   ACTORS( (dan)(eric)(sam) );
+   const asset_object& advanced = create_user_issued_asset( "ADVANCED", sam, 0 );
+   issue_uia( dan, advanced.amount( 1000 ) );
+   trx.validate();
+   db.push_transaction(trx, ~0);
+   trx.operations.clear();
+   BOOST_REQUIRE_EQUAL( get_balance( dan, advanced ), 1000 );
+
+   trx.operations.clear();
+   override_transfer_operation otrans{ asset(), advanced.issuer, dan.id, eric.id, advanced.amount(100) };
+   trx.operations.push_back(otrans);
+
+   BOOST_TEST_MESSAGE( "Require throwing without signature" );
+   BOOST_REQUIRE_THROW( PUSH_TX( db, trx, 0 ), fc::exception);
+   BOOST_TEST_MESSAGE( "Require throwing with dan's signature" );
+   trx.sign( dan_private_key );
+   BOOST_REQUIRE_THROW( PUSH_TX( db, trx, 0 ), fc::exception);
+   BOOST_TEST_MESSAGE( "Fail because overide_authority flag is not set" );
+   trx.signatures.clear();
+   trx.sign( sam_private_key );
+   BOOST_REQUIRE_THROW( PUSH_TX( db, trx, 0 ), fc::exception );
+
+   BOOST_REQUIRE_EQUAL( get_balance( dan, advanced ), 1000 );
+   BOOST_REQUIRE_EQUAL( get_balance( eric, advanced ), 0 );
+} FC_LOG_AND_RETHROW() }
+
 BOOST_AUTO_TEST_CASE( issue_whitelist_uia )
 {
    try {
@@ -82,16 +137,16 @@ BOOST_AUTO_TEST_CASE( issue_whitelist_uia )
       asset_issue_operation op({asset(), advanced.issuer, advanced.amount(1000), nathan.id});
       trx.operations.emplace_back(op);
       //Fail because nathan is not whitelisted.
-      BOOST_REQUIRE_THROW(db.push_transaction(trx, ~0), fc::exception);
+      BOOST_REQUIRE_THROW(PUSH_TX( db, trx, ~0 ), fc::exception);
 
       account_whitelist_operation wop({asset(), account_id_type(), nathan.id, account_whitelist_operation::white_listed});
 
       trx.operations.back() = wop;
-      db.push_transaction(trx, ~0);
+      PUSH_TX( db, trx, ~0 );
 
       BOOST_CHECK(nathan.is_authorized_asset(advanced));
       trx.operations.back() = op;
-      db.push_transaction(trx, ~0);
+      PUSH_TX( db, trx, ~0 );
 
       BOOST_CHECK_EQUAL(get_balance(nathan, advanced), 1000);
    } catch(fc::exception& e) {
@@ -113,13 +168,13 @@ BOOST_AUTO_TEST_CASE( transfer_whitelist_uia )
       transfer_operation op({advanced.amount(0), nathan.id, dan.id, advanced.amount(100)});
       trx.operations.push_back(op);
       //Fail because dan is not whitelisted.
-      BOOST_REQUIRE_THROW(db.push_transaction(trx, ~0), fc::exception);
+      BOOST_REQUIRE_THROW(PUSH_TX( db, trx, ~0 ), fc::exception);
 
       account_whitelist_operation wop({asset(), account_id_type(), dan.id, account_whitelist_operation::white_listed});
       trx.operations.back() = wop;
-      db.push_transaction(trx, ~0);
+      PUSH_TX( db, trx, ~0 );
       trx.operations.back() = op;
-      db.push_transaction(trx, ~0);
+      PUSH_TX( db, trx, ~0 );
 
       BOOST_CHECK_EQUAL(get_balance(nathan, advanced), 900);
       BOOST_CHECK_EQUAL(get_balance(dan, advanced), 100);
@@ -127,16 +182,19 @@ BOOST_AUTO_TEST_CASE( transfer_whitelist_uia )
       wop.new_listing |= account_whitelist_operation::black_listed;
       wop.account_to_list = nathan.id;
       trx.operations.back() = wop;
-      db.push_transaction(trx, ~0);
+      PUSH_TX( db, trx, ~0 );
 
       op.amount = advanced.amount(50);
       trx.operations.back() = op;
       //Fail because nathan is blacklisted
-      BOOST_REQUIRE_THROW(db.push_transaction(trx, ~0), fc::exception);
+      BOOST_REQUIRE_THROW(PUSH_TX( db, trx, ~0 ), fc::exception);
+      trx.operations = {asset_reserve_operation{asset(), nathan.id, advanced.amount(10)}};
+      //Fail because nathan is blacklisted
+      BOOST_REQUIRE_THROW(PUSH_TX( db, trx, ~0 ), fc::exception);
       std::swap(op.from, op.to);
       trx.operations.back() = op;
       //Fail because nathan is blacklisted
-      BOOST_REQUIRE_THROW(db.push_transaction(trx, ~0), fc::exception);
+      BOOST_REQUIRE_THROW(PUSH_TX( db, trx, ~0 ), fc::exception);
 
       {
          asset_update_operation op;
@@ -145,12 +203,12 @@ BOOST_AUTO_TEST_CASE( transfer_whitelist_uia )
          op.new_options.blacklist_authorities.clear();
          op.new_options.blacklist_authorities.insert(dan.id);
          trx.operations.back() = op;
-         db.push_transaction(trx, ~0);
+         PUSH_TX( db, trx, ~0 );
          BOOST_CHECK(advanced.options.blacklist_authorities.find(dan.id) != advanced.options.blacklist_authorities.end());
       }
 
       trx.operations.back() = op;
-      db.push_transaction(trx, ~0);
+      PUSH_TX( db, trx, ~0 );
       BOOST_CHECK_EQUAL(get_balance(nathan, advanced), 950);
       BOOST_CHECK_EQUAL(get_balance(dan, advanced), 50);
 
@@ -158,29 +216,33 @@ BOOST_AUTO_TEST_CASE( transfer_whitelist_uia )
       wop.account_to_list = nathan.id;
       wop.new_listing = account_whitelist_operation::black_listed;
       trx.operations.back() = wop;
-      db.push_transaction(trx, ~0);
+      PUSH_TX( db, trx, ~0 );
 
       trx.operations.back() = op;
       //Fail because nathan is blacklisted
       BOOST_CHECK(!nathan.is_authorized_asset(advanced));
-      BOOST_REQUIRE_THROW(db.push_transaction(trx, ~0), fc::exception);
+      BOOST_REQUIRE_THROW(PUSH_TX( db, trx, ~0 ), fc::exception);
 
       //Remove nathan from genesis' whitelist, add him to dan's. This should not authorize him to hold ADVANCED.
       wop.authorizing_account = account_id_type();
       wop.account_to_list = nathan.id;
       wop.new_listing = account_whitelist_operation::no_listing;
       trx.operations.back() = wop;
-      db.push_transaction(trx, ~0);
+      PUSH_TX( db, trx, ~0 );
       wop.authorizing_account = dan.id;
       wop.account_to_list = nathan.id;
       wop.new_listing = account_whitelist_operation::white_listed;
       trx.operations.back() = wop;
-      db.push_transaction(trx, ~0);
+      PUSH_TX( db, trx, ~0 );
 
       trx.operations.back() = op;
       //Fail because nathan is not whitelisted
       BOOST_CHECK(!nathan.is_authorized_asset(advanced));
-      BOOST_REQUIRE_THROW(db.push_transaction(trx, ~0), fc::exception);
+      BOOST_REQUIRE_THROW(PUSH_TX( db, trx, ~0 ), fc::exception);
+
+      trx.operations = {asset_reserve_operation{asset(), dan.id, advanced.amount(10)}};
+      PUSH_TX(db, trx, ~0);
+      BOOST_CHECK_EQUAL(get_balance(dan, advanced), 40);
    } catch(fc::exception& e) {
       edump((e.to_detail_string()));
       throw;

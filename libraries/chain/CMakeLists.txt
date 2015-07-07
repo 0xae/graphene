@@ -3,27 +3,31 @@ file(GLOB HEADERS "include/graphene/chain/*.hpp")
 ## SORT .cpp by most likely to change / break compile
 add_library( graphene_chain
              types.cpp
+             type_id.cpp
+
              address.cpp
+             pts_address.cpp
              asset.cpp
+             predicate.cpp
 
              operations.cpp
 
              evaluator.cpp
+             balance_evaluator.cpp
              global_parameters_evaluator.cpp
              account_evaluator.cpp
+             assert_evaluator.cpp
              witness_evaluator.cpp
              delegate_evaluator.cpp
              asset_evaluator.cpp
              transfer_evaluator.cpp
              proposal_evaluator.cpp
-             short_order_evaluator.cpp
+             call_order_evaluator.cpp
              limit_order_evaluator.cpp
-             bond_evaluator.cpp
              vesting_balance_evaluator.cpp
              withdraw_permission_evaluator.cpp
              worker_evaluator.cpp
 
-             key_object.cpp
              account_object.cpp
              asset_object.cpp
              proposal_object.cpp
@@ -35,6 +39,7 @@ add_library( graphene_chain
 
              transaction_evaluation_state.cpp
              fork_database.cpp
+             block_database.cpp
 
              db_balance.cpp
              db_block.cpp
@@ -50,10 +55,10 @@ add_library( graphene_chain
              ${HEADERS}
            )
 
-target_link_libraries( graphene_chain fc graphene_db leveldb )
+target_link_libraries( graphene_chain fc graphene_db )
 target_include_directories( graphene_chain
                             PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" )
 
 if(MSVC)
-  set_source_files_properties( db_init.cpp PROPERTIES COMPILE_FLAGS "/bigobj" )
+  set_source_files_properties( db_init.cpp db_block.cpp PROPERTIES COMPILE_FLAGS "/bigobj" )
 endif(MSVC)

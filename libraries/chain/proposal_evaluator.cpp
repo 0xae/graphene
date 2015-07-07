@@ -18,12 +18,11 @@
 #include <graphene/chain/proposal_evaluator.hpp>
 #include <graphene/chain/proposal_object.hpp>
 #include <graphene/chain/account_object.hpp>
-#include <graphene/chain/key_object.hpp>
 
 namespace graphene { namespace chain {
 
-object_id_type proposal_create_evaluator::do_evaluate(const proposal_create_operation& o)
-{
+void_result proposal_create_evaluator::do_evaluate(const proposal_create_operation& o)
+{ try {
    const database& d = db();
    const auto& global_parameters = d.get_global_properties().parameters;
 
@@ -37,21 +36,24 @@ object_id_type proposal_create_evaluator::do_evaluate(const proposal_create_oper
       // If we're dealing with the genesis authority, make sure this transaction has a sufficient review period.
       flat_set<account_id_type> auths;
       for( auto& op : o.proposed_ops )
-         op.op.visit(operation_get_required_auths(auths, auths));
+      {
+         operation_get_required_active_authorities(op.op, auths);
+         operation_get_required_owner_authorities(op.op, auths);
+      }
       if( auths.find(account_id_type()) != auths.end() )
          FC_ASSERT( o.review_period_seconds
-                    && *o.review_period_seconds >= global_parameters.genesis_proposal_review_period );
+                    && *o.review_period_seconds >= global_parameters.committee_proposal_review_period );
    }
 
    for( const op_wrapper& op : o.proposed_ops )
       _proposed_trx.operations.push_back(op.op);
    _proposed_trx.validate();
 
-   return object_id_type();
-}
+   return void_result();
+} FC_CAPTURE_AND_RETHROW( (o) ) }
 
 object_id_type proposal_create_evaluator::do_apply(const proposal_create_operation& o)
-{
+{ try {
    database& d = db();
 
    const proposal_object& proposal = d.create<proposal_object>([&](proposal_object& proposal) {
@@ -62,7 +64,13 @@ object_id_type proposal_create_evaluator::do_apply(const proposal_create_operati
 
       //Populate the required approval sets
       flat_set<account_id_type> required_active;
-      _proposed_trx.visit(operation_get_required_auths(required_active, proposal.required_owner_approvals));
+
+      for( auto& op : _proposed_trx.operations )
+      {
+         operation_get_required_active_authorities(op, required_active);
+         operation_get_required_owner_authorities(op, proposal.required_owner_approvals);
+      }
+
       //All accounts which must provide both owner and active authority should be omitted from the active authority set;
       //owner authority approval implies active authority approval.
       std::set_difference(required_active.begin(), required_active.end(),
@@ -71,10 +79,10 @@ object_id_type proposal_create_evaluator::do_apply(const proposal_create_operati
    });
 
    return proposal.id;
-}
+} FC_CAPTURE_AND_RETHROW( (o) ) }
 
-object_id_type proposal_update_evaluator::do_evaluate(const proposal_update_operation& o)
-{
+void_result proposal_update_evaluator::do_evaluate(const proposal_update_operation& o)
+{ try {
    database& d = db();
 
    _proposal = &o.proposal(d);
@@ -93,20 +101,26 @@ object_id_type proposal_update_evaluator::do_evaluate(const proposal_update_oper
       FC_ASSERT( _proposal->available_owner_approvals.find(id) != _proposal->available_owner_approvals.end(),
                  "", ("id", id)("available", _proposal->available_owner_approvals) );
    }
-   for( key_id_type id : o.key_approvals_to_add )
+
+   /*  All authority checks happen outside of evaluators, TODO: verify this is checked elsewhere
+   */
+   if( (d.get_node_properties().skip_flags & database::skip_authority_check) == 0 )
    {
-      FC_ASSERT( trx_state->signed_by(id) || trx_state->_skip_authority_check );
-   }
-   for( key_id_type id : o.key_approvals_to_remove )
-   {
-      FC_ASSERT( trx_state->signed_by(id) || trx_state->_skip_authority_check );
+      for( const auto& id : o.key_approvals_to_add )
+      {
+         FC_ASSERT( trx_state->signed_by(id) );
+      }
+      for( const auto& id : o.key_approvals_to_remove )
+      {
+         FC_ASSERT( trx_state->signed_by(id) );
+      }
    }
 
-   return object_id_type();
-}
+   return void_result();
+} FC_CAPTURE_AND_RETHROW( (o) ) }
 
-object_id_type proposal_update_evaluator::do_apply(const proposal_update_operation& o)
-{
+void_result proposal_update_evaluator::do_apply(const proposal_update_operation& o)
+{ try {
    database& d = db();
 
    // Potential optimization: if _executed_proposal is true, we can skip the modify step and make push_proposal skip
@@ -119,18 +133,18 @@ object_id_type proposal_update_evaluator::do_apply(const proposal_update_operati
          p.available_active_approvals.erase(id);
       for( account_id_type id : o.owner_approvals_to_remove )
          p.available_owner_approvals.erase(id);
-      for( key_id_type id : o.key_approvals_to_add )
+      for( const auto& id : o.key_approvals_to_add )
          p.available_key_approvals.insert(id);
-      for( key_id_type id : o.key_approvals_to_remove )
+      for( const auto& id : o.key_approvals_to_remove )
          p.available_key_approvals.erase(id);
    });
 
    // If the proposal has a review period, don't bother attempting to authorize/execute it.
    // Proposals with a review period may never be executed except at their expiration.
    if( _proposal->review_period_time )
-      return object_id_type();
+      return void_result();
 
-   if( _proposal->is_authorized_to_execute(&d) )
+   if( _proposal->is_authorized_to_execute(d) )
    {
       // All required approvals are satisfied. Execute!
       _executed_proposal = true;
@@ -143,11 +157,11 @@ object_id_type proposal_update_evaluator::do_apply(const proposal_update_operati
       }
    }
 
-   return object_id_type();
-}
+   return void_result();
+} FC_CAPTURE_AND_RETHROW( (o) ) }
 
-object_id_type proposal_delete_evaluator::do_evaluate(const proposal_delete_operation& o)
-{
+void_result proposal_delete_evaluator::do_evaluate(const proposal_delete_operation& o)
+{ try {
    database& d = db();
 
    _proposal = &o.proposal(d);
@@ -158,14 +172,14 @@ object_id_type proposal_delete_evaluator::do_evaluate(const proposal_delete_oper
               "Provided authority is not authoritative for this proposal.",
               ("provided", o.fee_paying_account)("required", *required_approvals));
 
-   return object_id_type();
-}
+   return void_result();
+} FC_CAPTURE_AND_RETHROW( (o) ) }
 
-object_id_type proposal_delete_evaluator::do_apply(const proposal_delete_operation&)
-{
+void_result proposal_delete_evaluator::do_apply(const proposal_delete_operation& o)
+{ try {
    db().remove(*_proposal);
 
-   return object_id_type();
-}
+   return void_result();
+} FC_CAPTURE_AND_RETHROW( (o) ) }
 
 } } // graphene::chain

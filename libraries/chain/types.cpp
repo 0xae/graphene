@@ -38,6 +38,17 @@ namespace graphene { namespace chain {
       // TODO:  Refactor syntactic checks into static is_valid()
       //        to make public_key_type API more similar to address API
        std::string prefix( GRAPHENE_ADDRESS_PREFIX );
+
+       // TODO: This is temporary for testing
+       try
+       {
+           if( is_valid_v1( base58str ) )
+               prefix = std::string( "BTS" );
+       }
+       catch( ... )
+       {
+       }
+
        const size_t prefix_len = prefix.size();
        FC_ASSERT( base58str.size() > prefix_len );
        FC_ASSERT( base58str.substr( 0, prefix_len ) ==  prefix , "", ("base58str", base58str) );
@@ -46,6 +57,20 @@ namespace graphene { namespace chain {
        key_data = bin_key.data;
        FC_ASSERT( fc::ripemd160::hash( key_data.data, key_data.size() )._hash[0] == bin_key.check );
     };
+
+    // TODO: This is temporary for testing
+    bool public_key_type::is_valid_v1( const std::string& base58str )
+    {
+       std::string prefix( "BTS" );
+       const size_t prefix_len = prefix.size();
+       FC_ASSERT( base58str.size() > prefix_len );
+       FC_ASSERT( base58str.substr( 0, prefix_len ) ==  prefix , "", ("base58str", base58str) );
+       auto bin = fc::from_base58( base58str.substr( prefix_len ) );
+       auto bin_key = fc::raw::unpack<binary_key>(bin);
+       fc::ecc::public_key_data key_data = bin_key.data;
+       FC_ASSERT( fc::ripemd160::hash( key_data.data, key_data.size() )._hash[0] == bin_key.check );
+       return true;
+    }
 
     public_key_type::operator fc::ecc::public_key_data() const
     {
@@ -79,6 +104,35 @@ namespace graphene { namespace chain {
     bool operator != ( const public_key_type& p1, const public_key_type& p2)
     {
        return p1.key_data != p2.key_data;
+    }
+    /**
+     * @brief The fee_set_visitor struct sets all fees to a particular value in one fell swoop
+     *
+     * Example:
+     * @code
+     * fee_schedule_type sch;
+     * // Set all fees to 50
+     * fc::reflector<fee_schedule_type>::visit(fee_schedule_type::fee_set_visitor{sch, 50});
+     * @endcode
+     */
+    struct fee_set_visitor {
+       fee_schedule_type& f;
+       uint64_t fee;
+    
+       template<typename Member, typename Class, uint64_t (Class::*member)>
+       void operator()(const char*)const
+       {
+          f.*member = fee;
+       }
+       template<typename Member, typename Class, flat_map<unsigned_int,uint64_t> (Class::*member)>
+       void operator()(const char*)const
+       {
+       }
+    };
+
+    void fee_schedule_type::set_all_fees( uint64_t v )
+    {
+       fc::reflector<fee_schedule_type>::visit(fee_set_visitor{*this, v});
     }
 
 } } // graphene::chain

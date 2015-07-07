@@ -38,12 +38,6 @@ asset database::get_balance(const account_object& owner, const asset_object& ass
    return get_balance(owner.get_id(), asset_obj.get_id());
 }
 
-// TODO: this method should be removed
-asset database::get_balance( const account_object* owner, const asset_object* asset_obj )const
-{
-   return get_balance(*owner, *asset_obj);
-}
-
 void database::adjust_balance(account_id_type account, asset delta )
 { try {
    if( delta.amount == 0 )
@@ -73,12 +67,6 @@ void database::adjust_balance(const account_object& account, asset delta )
    adjust_balance( account.id, delta);
 }
 
-// TODO:  This method should be removed
-void database::adjust_balance(const account_object* account, asset delta)
-{
-   adjust_balance(*account, delta);
-}
-
 void database::adjust_core_in_orders( const account_object& acnt, asset delta )
 {
    if( delta.asset_id == asset_id_type(0) && delta.amount != 0 )
@@ -96,6 +84,17 @@ void database::deposit_cashback(const account_object& acct, share_type amount, b
 
    if( amount == 0 )
       return;
+
+   if( acct.get_id() == GRAPHENE_COMMITTEE_ACCOUNT || acct.get_id() == GRAPHENE_WITNESS_ACCOUNT ||
+       acct.get_id() == GRAPHENE_RELAXED_COMMITTEE_ACCOUNT || acct.get_id() == GRAPHENE_NULL_ACCOUNT ||
+       acct.get_id() == GRAPHENE_TEMP_ACCOUNT )
+   {
+      // The blockchain's accounts do not get cashback; it simply goes to the reserve pool.
+      modify(get(asset_id_type()).dynamic_asset_data_id(*this), [amount](asset_dynamic_data_object& d) {
+         d.current_supply -= amount;
+      });
+      return;
+   }
 
    uint32_t global_vesting_seconds = get_global_properties().parameters.cashback_vesting_period_seconds;
    fc::time_point_sec now = head_block_time();

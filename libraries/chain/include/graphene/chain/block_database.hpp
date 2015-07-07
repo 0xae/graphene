@@ -16,30 +16,28 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #pragma once
-#include <graphene/chain/evaluator.hpp>
+#include <fstream>
+#include <graphene/chain/block.hpp>
 
 namespace graphene { namespace chain {
-
-   class key_create_evaluator : public evaluator<key_create_evaluator>
+   class block_database 
    {
       public:
-         typedef key_create_operation operation_type;
+         void open( const fc::path& dbdir );
+         bool is_open()const;
+         void flush();
+         void close();
 
-         object_id_type do_evaluate( const key_create_operation& op )
-         {
-            return object_id_type();
-         }
+         void store( const block_id_type& id, const signed_block& b );
+         void remove( const block_id_type& id );
 
-         object_id_type do_apply( const key_create_operation& op )
-         {
-            new_key_object = &db().create<key_object>( [&]( key_object& obj ){
-                obj.key_data = op.key_data;
-            });
-
-            return new_key_object->id;
-         }
-
-         const key_object*                new_key_object = nullptr;
+         bool                   contains( const block_id_type& id )const;
+         block_id_type          fetch_block_id( uint32_t block_num )const;
+         optional<signed_block> fetch_optional( const block_id_type& id )const;
+         optional<signed_block> fetch_by_number( uint32_t block_num )const;
+         optional<signed_block> last()const;
+      private:
+         mutable std::fstream _blocks;
+         mutable std::fstream _block_num_to_pos;
    };
-
-} } // graphene::chain
+} }

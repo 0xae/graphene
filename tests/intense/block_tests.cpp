@@ -23,10 +23,10 @@
 
 #include <graphene/chain/database.hpp>
 #include <graphene/chain/operations.hpp>
-#include <graphene/chain/key_object.hpp>
 #include <graphene/chain/account_object.hpp>
 #include <graphene/chain/proposal_object.hpp>
 #include <graphene/chain/witness_schedule_object.hpp>
+#include <graphene/chain/vesting_balance_object.hpp>
 
 #include <fc/crypto/digest.hpp>
 
@@ -49,7 +49,7 @@ BOOST_FIXTURE_TEST_CASE( update_account_keys, database_fixture )
         ;
 
       // Sam is the creator of accounts
-      private_key_type genesis_key = generate_private_key("genesis");
+      private_key_type genesis_key = delegate_priv_key;
       private_key_type sam_key = generate_private_key("sam");
 
       //
@@ -72,7 +72,7 @@ BOOST_FIXTURE_TEST_CASE( update_account_keys, database_fixture )
       generate_block( skip_flags );
 
       db.modify(db.get_global_properties(), [](global_property_object& p) {
-         p.parameters.genesis_proposal_review_period = fc::hours(1).to_seconds();
+         p.parameters.committee_proposal_review_period = fc::hours(1).to_seconds();
       });
 
       transaction tx;
@@ -84,10 +84,10 @@ BOOST_FIXTURE_TEST_CASE( update_account_keys, database_fixture )
 
       const int num_keys = 5;
       vector< private_key_type > numbered_private_keys;
-      vector< vector< key_id_type > > numbered_key_id;
+      vector< vector< public_key_type > > numbered_key_id;
       numbered_private_keys.reserve( num_keys );
-      numbered_key_id.push_back( vector<key_id_type>() );
-      numbered_key_id.push_back( vector<key_id_type>() );
+      numbered_key_id.push_back( vector<public_key_type>() );
+      numbered_key_id.push_back( vector<public_key_type>() );
 
       for( int i=0; i<num_keys; i++ )
       {
@@ -96,12 +96,9 @@ BOOST_FIXTURE_TEST_CASE( update_account_keys, database_fixture )
          public_key_type pubkey = privkey.get_public_key();
          address addr( pubkey );
 
-         key_id_type public_key_id = register_key( pubkey ).id;
-         key_id_type addr_id = register_address( addr ).id;
-
          numbered_private_keys.push_back( privkey );
-         numbered_key_id[0].push_back( public_key_id );
-         numbered_key_id[1].push_back( addr_id );
+         numbered_key_id[0].push_back( pubkey );
+         //numbered_key_id[1].push_back( addr );
       }
 
       // each element of possible_key_sched is a list of exactly num_keys
@@ -134,7 +131,7 @@ BOOST_FIXTURE_TEST_CASE( update_account_keys, database_fixture )
       std::cout << "update_account_keys:  this test will take a few minutes...\n";
       for( int use_addresses=0; use_addresses<2; use_addresses++ )
       {
-         vector< key_id_type > key_ids = numbered_key_id[ use_addresses ];
+         vector< public_key_type > key_ids = numbered_key_id[ use_addresses ];
          for( int num_owner_keys=1; num_owner_keys<=2; num_owner_keys++ )
          {
             for( int num_active_keys=1; num_active_keys<=2; num_active_keys++ )
@@ -144,7 +141,7 @@ BOOST_FIXTURE_TEST_CASE( update_account_keys, database_fixture )
                {
                   auto it = key_sched_before.begin();
                   vector< const private_key_type* > owner_privkey;
-                  vector< const key_id_type* > owner_keyid;
+                  vector< const public_key_type* > owner_keyid;
                   owner_privkey.reserve( num_owner_keys );
 
                   trx.clear();
@@ -154,19 +151,19 @@ BOOST_FIXTURE_TEST_CASE( update_account_keys, database_fixture )
                   for( int owner_index=0; owner_index<num_owner_keys; owner_index++ )
                   {
                      int i = *(it++);
-                     create_op.owner.auths[ key_ids[ i ] ] = 1;
+                     create_op.owner.key_auths[ key_ids[ i ] ] = 1;
                      owner_privkey.push_back( &numbered_private_keys[i] );
                      owner_keyid.push_back( &key_ids[ i ] );
                   }
                   // size() < num_owner_keys is possible when some keys are duplicates
-                  create_op.owner.weight_threshold = create_op.owner.auths.size();
+                  create_op.owner.weight_threshold = create_op.owner.key_auths.size();
 
                   for( int active_index=0; active_index<num_active_keys; active_index++ )
-                     create_op.active.auths[ key_ids[ *(it++) ] ] = 1;
+                     create_op.active.key_auths[ key_ids[ *(it++) ] ] = 1;
                   // size() < num_active_keys is possible when some keys are duplicates
-                  create_op.active.weight_threshold = create_op.active.auths.size();
+                  create_op.active.weight_threshold = create_op.active.key_auths.size();
 
-                  create_op.memo_key = key_ids[ *(it++) ] ;
+                  create_op.options.memo_key = key_ids[ *(it++) ] ;
                   create_op.registrar = sam_account_object.id;
                   trx.operations.push_back( create_op );
                   // trx.sign( sam_key );
@@ -191,21 +188,23 @@ BOOST_FIXTURE_TEST_CASE( update_account_keys, database_fixture )
                      update_op.account = alice_account_id;
                      update_op.owner = authority();
                      update_op.active = authority();
+                     update_op.new_options = create_op.options;
 
                      for( int owner_index=0; owner_index<num_owner_keys; owner_index++ )
-                        update_op.owner->auths[ key_ids[ *(it++) ] ] = 1;
+                        update_op.owner->key_auths[ key_ids[ *(it++) ] ] = 1;
                      // size() < num_owner_keys is possible when some keys are duplicates
-                     update_op.owner->weight_threshold = update_op.owner->auths.size();
+                     update_op.owner->weight_threshold = update_op.owner->key_auths.size();
                      for( int active_index=0; active_index<num_active_keys; active_index++ )
-                        update_op.active->auths[ key_ids[ *(it++) ] ] = 1;
+                        update_op.active->key_auths[ key_ids[ *(it++) ] ] = 1;
                      // size() < num_active_keys is possible when some keys are duplicates
-                     update_op.active->weight_threshold = update_op.active->auths.size();
-                     update_op.memo_key = key_ids[ *(it++) ] ;
+                     update_op.active->weight_threshold = update_op.active->key_auths.size();
+                     FC_ASSERT( update_op.new_options.valid() );
+                     update_op.new_options->memo_key = key_ids[ *(it++) ] ;
 
                      trx.operations.push_back( update_op );
                      for( int i=0; i<int(create_op.owner.weight_threshold); i++)
                      {
-                        trx.sign( *owner_keyid[i], *owner_privkey[i] );
+                        trx.sign( *owner_privkey[i] );
                         if( i < int(create_op.owner.weight_threshold-1) )
                         {
                            BOOST_REQUIRE_THROW(db.push_transaction(trx), fc::exception);
@@ -402,5 +401,92 @@ BOOST_FIXTURE_TEST_CASE( generic_scheduler_mc_test, database_fixture )
       throw;
    }
 }
+
+BOOST_FIXTURE_TEST_CASE( tapos_rollover, database_fixture )
+{
+   try
+   {
+      ACTORS((alice)(bob));
+      const auto& core   = asset_id_type()(db);
+
+      BOOST_TEST_MESSAGE( "Give Alice some money" );
+      transfer(genesis_account, alice_id, asset(10000));
+      generate_block();
+
+      BOOST_TEST_MESSAGE( "Generate up to block 0xFF00" );
+      generate_blocks( 0xFF00 );
+      signed_transaction xfer_tx;
+
+      BOOST_TEST_MESSAGE( "Transfer money at/about 0xFF00" );
+      transfer_operation xfer_op;
+      xfer_op.from = alice_id;
+      xfer_op.to = bob_id;
+      xfer_op.amount = asset(1000);
+
+      xfer_tx.operations.push_back( xfer_op );
+      xfer_tx.set_expiration( db.head_block_id(), 0x1000 );
+      sign( xfer_tx, alice_private_key );
+      PUSH_TX( db, xfer_tx, 0 );
+      generate_block();
+
+      BOOST_TEST_MESSAGE( "Sign new tx's" );
+      xfer_tx.set_expiration( db.head_block_id(), 0x1000 );
+      xfer_tx.signatures.clear();
+      sign( xfer_tx, alice_private_key );
+
+      BOOST_TEST_MESSAGE( "Generate up to block 0x10010" );
+      generate_blocks( 0x110 );
+
+      BOOST_TEST_MESSAGE( "Transfer at/about block 0x10010 using reference block at/about 0xFF00" );
+      PUSH_TX( db, xfer_tx, 0 );
+      generate_block();
+   }
+   catch (fc::exception& e)
+   {
+      edump((e.to_detail_string()));
+      throw;
+   }
+}
+
+BOOST_FIXTURE_TEST_CASE(bulk_discount, database_fixture)
+{ try {
+   ACTOR(nathan);
+   // Give nathan ALLLLLL the money!
+   transfer(GRAPHENE_COMMITTEE_ACCOUNT, nathan_id, db.get_balance(GRAPHENE_COMMITTEE_ACCOUNT, asset_id_type()));
+   enable_fees(GRAPHENE_BLOCKCHAIN_PRECISION*10);
+   upgrade_to_lifetime_member(nathan_id);
+   share_type new_fees;
+   while( nathan_id(db).statistics(db).lifetime_fees_paid + new_fees < GRAPHENE_DEFAULT_BULK_DISCOUNT_THRESHOLD_MIN )
+   {
+      transfer(nathan_id, GRAPHENE_COMMITTEE_ACCOUNT, asset(1));
+      new_fees += transfer_operation().calculate_fee(db.current_fee_schedule());
+   }
+   generate_blocks(db.get_dynamic_global_properties().next_maintenance_time);
+   enable_fees(GRAPHENE_BLOCKCHAIN_PRECISION*10);
+   auto old_cashback = nathan_id(db).cashback_balance(db).balance;
+
+   transfer(nathan_id, GRAPHENE_COMMITTEE_ACCOUNT, asset(1));
+   generate_blocks(db.get_dynamic_global_properties().next_maintenance_time);
+   enable_fees(GRAPHENE_BLOCKCHAIN_PRECISION*10);
+
+   BOOST_CHECK_EQUAL(nathan_id(db).cashback_balance(db).balance.amount.value,
+                     old_cashback.amount.value + GRAPHENE_BLOCKCHAIN_PRECISION * 8);
+
+   new_fees = 0;
+   while( nathan_id(db).statistics(db).lifetime_fees_paid + new_fees < GRAPHENE_DEFAULT_BULK_DISCOUNT_THRESHOLD_MAX )
+   {
+      transfer(nathan_id, GRAPHENE_COMMITTEE_ACCOUNT, asset(1));
+      new_fees += transfer_operation().calculate_fee(db.current_fee_schedule());
+   }
+   generate_blocks(db.get_dynamic_global_properties().next_maintenance_time);
+   enable_fees(GRAPHENE_BLOCKCHAIN_PRECISION*10);
+   old_cashback = nathan_id(db).cashback_balance(db).balance;
+
+   transfer(nathan_id, GRAPHENE_COMMITTEE_ACCOUNT, asset(1));
+   generate_blocks(db.get_dynamic_global_properties().next_maintenance_time);
+
+   BOOST_CHECK_EQUAL(nathan_id(db).cashback_balance(db).balance.amount.value,
+                     old_cashback.amount.value + GRAPHENE_BLOCKCHAIN_PRECISION * 9);
+} FC_LOG_AND_RETHROW() }
 
 BOOST_AUTO_TEST_SUITE_END()

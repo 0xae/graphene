@@ -17,6 +17,7 @@
  */
 #include <graphene/chain/transaction.hpp>
 #include <fc/io/raw.hpp>
+#include <fc/bitutil.hpp>
 
 namespace graphene { namespace chain {
 
@@ -36,7 +37,6 @@ digest_type processed_transaction::merkle_digest()const
 digest_type transaction::digest()const
 {
    //Only use this digest() for transactions with absolute expiration times.
-   if( relative_expiration != 0 ) edump((*this));
    assert(relative_expiration == 0);
    digest_type::encoder enc;
    fc::raw::pack( enc, *this );
@@ -48,7 +48,7 @@ void transaction::validate() const
       FC_ASSERT( ref_block_num == 0 && ref_block_prefix > 0 );
 
    for( const auto& op : operations )
-      op.visit(operation_validator());
+      operation_validate(op); 
 }
 
 graphene::chain::transaction_id_type graphene::chain::transaction::id() const
@@ -60,15 +60,41 @@ graphene::chain::transaction_id_type graphene::chain::transaction::id() const
    memcpy(result._hash, hash._hash, std::min(sizeof(result), sizeof(hash)));
    return result;
 }
-void graphene::chain::signed_transaction::sign( key_id_type id, const private_key_type& key )
+
+void graphene::chain::signed_transaction::sign(const private_key_type& key)
 {
    if( relative_expiration != 0 )
    {
-      if( !block_id_cache.valid() ) edump((*this));
+      // Relative expiration is set, meaning we must include the block ID in the signature
       assert(block_id_cache.valid());
-      signatures[id] =  key.sign_compact( digest(*block_id_cache) );
+      signatures.push_back(key.sign_compact(digest(*block_id_cache)));
    } else {
-      signatures[id] =  key.sign_compact( digest() );
+      signatures.push_back(key.sign_compact(digest()));
+   }
+}
+
+void transaction::set_expiration( fc::time_point_sec expiration_time )
+{
+    ref_block_num = 0;
+    relative_expiration = 0;
+    ref_block_prefix = expiration_time.sec_since_epoch();
+    block_id_cache.reset();
+}
+
+void transaction::set_expiration( const block_id_type& reference_block, unsigned_int lifetime_intervals )
+{
+   ref_block_num = fc::endian_reverse_u32(reference_block._hash[0]);
+   ref_block_prefix = reference_block._hash[1];
+   relative_expiration = lifetime_intervals;
+   block_id_cache = reference_block;
+}
+void transaction::get_required_authorities( flat_set<account_id_type>& active, flat_set<account_id_type>& owner, vector<authority>& other )
+{
+   for( const auto& op : operations )
+   {
+      operation_get_required_active_authorities( op, active );
+      operation_get_required_owner_authorities( op, owner );
+      operation_get_required_authorities( op, other );
    }
 }
 

@@ -52,9 +52,9 @@ namespace graphene { namespace chain {
      * @{
      */
    /**
-    * @brief A worker who burns all of his pay
+    * @brief A worker who returns all of his pay to the reserve
     *
-    * This worker type burns all pay he receives, paying it back to the network's reserve funds pool.
+    * This worker type pays everything he receives back to the network's reserve funds pool.
     */
    struct refund_worker_type
    {
@@ -92,16 +92,37 @@ namespace graphene { namespace chain {
          uint16_t pay_vesting_period_days;
       };
    };
+
+   /**
+    * @brief A worker who permanently destroys all of his pay
+    *
+    * This worker sends all pay he receives to the null account.
+    */
+   struct burn_worker_type
+   {
+      /// Record of how much this worker has burned in his lifetime
+      share_type total_burned;
+
+      void pay_worker(share_type pay, database&);
+
+      struct initializer
+      {
+         void init(database&, const worker_object&, burn_worker_type& worker)const
+         {}
+      };
+   };
    ///@}
 
    // The ordering of types in these two static variants MUST be the same.
    typedef static_variant<
       refund_worker_type,
-      vesting_balance_worker_type
+      vesting_balance_worker_type,
+      burn_worker_type
    > worker_type;
    typedef static_variant<
       refund_worker_type::initializer,
-      vesting_balance_worker_type::initializer
+      vesting_balance_worker_type::initializer,
+      burn_worker_type::initializer
    > worker_initializer;
 
    /// @brief A visitor for @ref worker_type which initializes the worker within
@@ -157,20 +178,24 @@ namespace graphene { namespace chain {
          static const uint8_t type_id =  worker_object_type;
 
          /// ID of the account which owns this worker
-         account_id_type   worker_account;
+         account_id_type worker_account;
          /// Time at which this worker begins receiving pay, if elected
-         time_point_sec    work_begin_date;
+         time_point_sec work_begin_date;
          /// Time at which this worker will cease to receive pay. Worker will be deleted at this time
-         time_point_sec    work_end_date;
+         time_point_sec work_end_date;
          /// Amount in CORE this worker will be paid each day
-         share_type        daily_pay;
+         share_type daily_pay;
          /// ID of this worker's pay balance
-         worker_type       worker;
+         worker_type worker;
+         /// Human-readable name for the worker
+         string name;
+         /// URL to a web page representing this worker
+         string url;
 
          /// Voting ID which represents approval of this worker
-         vote_id_type                   vote_for;
+         vote_id_type vote_for;
          /// Voting ID which represents disapproval of this worker
-         vote_id_type                   vote_against;
+         vote_id_type vote_against;
 
          bool is_active(fc::time_point_sec now)const {
             return now >= work_begin_date && now <= work_end_date;
@@ -188,6 +213,10 @@ FC_REFLECT( graphene::chain::refund_worker_type, (total_burned) )
 FC_REFLECT( graphene::chain::refund_worker_type::initializer, )
 FC_REFLECT( graphene::chain::vesting_balance_worker_type, (balance) )
 FC_REFLECT( graphene::chain::vesting_balance_worker_type::initializer, (pay_vesting_period_days) )
+FC_REFLECT( graphene::chain::burn_worker_type, (total_burned) )
+FC_REFLECT( graphene::chain::burn_worker_type::initializer, )
+FC_REFLECT_TYPENAME( graphene::chain::worker_type )
+FC_REFLECT_TYPENAME( graphene::chain::worker_initializer )
 FC_REFLECT_DERIVED( graphene::chain::worker_object, (graphene::db::object),
                     (worker_account)
                     (work_begin_date)
@@ -196,4 +225,6 @@ FC_REFLECT_DERIVED( graphene::chain::worker_object, (graphene::db::object),
                     (worker)
                     (vote_for)
                     (vote_against)
+                    (name)
+                    (url)
                   )

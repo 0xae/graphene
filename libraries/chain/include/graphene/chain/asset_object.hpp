@@ -33,6 +33,7 @@
 
 namespace graphene { namespace chain {
    class account_object;
+   class database;
    using namespace graphene::db;
 
    /**
@@ -89,6 +90,7 @@ namespace graphene { namespace chain {
          bool charges_market_fees()const { return options.flags & charge_market_fee; }
          /// @return true if this asset may only be transferred to/from the issuer or market orders
          bool is_transfer_restricted()const { return options.flags & transfer_restricted; }
+         bool can_override()const { return options.flags & override_authority; }
 
          /// Helper function to get an asset object with the given amount in this asset's type
          asset amount(share_type a)const { return asset(a, id); }
@@ -108,11 +110,11 @@ namespace graphene { namespace chain {
          { FC_ASSERT(amount.asset_id == id); return amount_to_pretty_string(amount.amount); }
 
          /// Ticker symbol for this asset, i.e. "USD"
-         string                  symbol;
-         /// Maximum number of digits after the decimal point
-         uint64_t                precision;
+         string symbol;
+         /// Maximum number of digits after the decimal point (must be <= 12)
+         uint8_t precision;
          /// ID of the account which issued this asset.
-         account_id_type         issuer;
+         account_id_type issuer;
 
          /**
           * @brief The asset_options struct contains options available on all assets in the network
@@ -122,18 +124,18 @@ namespace graphene { namespace chain {
          struct asset_options {
             /// The maximum supply of this asset which may exist at any given time. This can be as large as
             /// GRAPHENE_MAX_SHARE_SUPPLY
-            share_type              max_supply         = GRAPHENE_MAX_SHARE_SUPPLY;
+            share_type max_supply = GRAPHENE_MAX_SHARE_SUPPLY;
             /// When this asset is traded on the markets, this percentage of the total traded will be exacted and paid
             /// to the issuer. This is a fixed point value, representing hundredths of a percent, i.e. a value of 100
             /// in this field means a 1% fee is charged on market trades of this asset.
-            uint16_t                market_fee_percent = 0;
-            share_type              max_market_fee = GRAPHENE_MAX_SHARE_SUPPLY;
-            share_type              min_market_fee;
+            uint16_t market_fee_percent = 0;
+            /// Market fees calculated as @ref market_fee_percent of the traded volume are capped to this value
+            share_type max_market_fee = GRAPHENE_MAX_SHARE_SUPPLY;
 
             /// The flags which the issuer has permission to update. See @ref asset_issuer_permission_flags
-            uint16_t                issuer_permissions = UIA_ASSET_ISSUER_PERMISSION_MASK;
+            uint16_t issuer_permissions = UIA_ASSET_ISSUER_PERMISSION_MASK;
             /// The currently active flags on this permission. See @ref asset_issuer_permission_flags
-            uint16_t                flags = 0;
+            uint16_t flags = 0;
 
             /// When a non-core asset is used to pay a fee, the blockchain must convert that asset to core asset in
             /// order to accept the fee. If this asset's fee pool is funded, the chain will automatically deposite fees
@@ -156,6 +158,12 @@ namespace graphene { namespace chain {
             /** defines the assets that this asset may not be traded against in the market, must not overlap whitelist */
             flat_set<asset_id_type>   blacklist_markets;
 
+            /**
+             * data that describes the meaning/purpose of this asset, fee will be charged proportional to
+             * size of description.
+             */
+            string description;
+
             /// Perform internal consistency checks.
             /// @throws fc::exception if any check fails
             void validate()const;
@@ -168,6 +176,8 @@ namespace graphene { namespace chain {
          struct bitasset_options {
             /// Time before a price feed expires
             uint32_t feed_lifetime_sec = GRAPHENE_DEFAULT_PRICE_FEED_LIFETIME;
+            /// Minimum number of unexpired feeds required to extract a median feed from
+            uint8_t minimum_feeds = 1;
             /// This is the delay between the time a long requests settlement and the chain evaluates the settlement
             uint32_t force_settlement_delay_sec = GRAPHENE_DEFAULT_FORCE_SETTLEMENT_DELAY;
             /// This is the percent to adjust the feed price in the short's favor in the event of a forced settlement
@@ -188,7 +198,7 @@ namespace graphene { namespace chain {
          };
 
          /// Current supply, fee pool, and collected fees are stored in a separate object as they change frequently.
-         dynamic_asset_data_id_type  dynamic_asset_data_id;
+         asset_dynamic_data_id_type  dynamic_asset_data_id;
          /// Extra data associated with BitAssets. This field is non-null if and only if is_market_issued() returns true
          optional<asset_bitasset_data_id_type> bitasset_data_id;
 
@@ -212,8 +222,11 @@ namespace graphene { namespace chain {
          const asset_dynamic_data_object& dynamic_data(const DB& db)const
          { return db.get(dynamic_asset_data_id); }
 
+         /**
+          *  The total amount of an asset that is reserved for future issuance. 
+          */
          template<class DB>
-         share_type burned( const DB& db )const
+         share_type reserved( const DB& db )const
          { return options.max_supply - dynamic_data(db).current_supply; }
    };
 
@@ -249,6 +262,22 @@ namespace graphene { namespace chain {
          share_type force_settled_volume;
          /// Calculate the maximum force settlement volume per maintenance interval, given the current share supply
          share_type max_force_settlement_volume(share_type current_supply)const;
+
+         /** return true if there has been a black swan, false otherwise */
+         bool has_settlement()const { return !settlement_price.is_null(); }
+
+         /**
+          *  In the event of a black swan, the swan price is saved in the settlement price, and all margin positions
+          *  are settled at the same price with the siezed collateral being moved into the settlement fund. From this
+          *  point on no further updates to the asset are permitted (no feeds, etc) and forced settlement occurs
+          *  immediately when requested, using the settlement price and fund.
+          */
+         ///@{
+         /// Price at which force settlements of a black swanned asset will occur
+         price settlement_price;
+         /// Amount of collateral which is available for force settlement
+         share_type settlement_fund;
+         ///@}
 
          time_point_sec feed_expiration_time()const
          { return current_feed_publication_time + options.feed_lifetime_sec; }
@@ -292,13 +321,14 @@ FC_REFLECT_DERIVED( graphene::chain::asset_bitasset_data_object, (graphene::db::
                     (options)
                     (force_settled_volume)
                     (is_prediction_market)
+                    (settlement_price)
+                    (settlement_fund)
                   )
 
 FC_REFLECT( graphene::chain::asset_object::asset_options,
             (max_supply)
             (market_fee_percent)
             (max_market_fee)
-            (min_market_fee)
             (issuer_permissions)
             (flags)
             (core_exchange_rate)
@@ -306,9 +336,11 @@ FC_REFLECT( graphene::chain::asset_object::asset_options,
             (blacklist_authorities)
             (whitelist_markets)
             (blacklist_markets)
+            (description)
           )
 FC_REFLECT( graphene::chain::asset_object::bitasset_options,
             (feed_lifetime_sec)
+            (minimum_feeds)
             (force_settlement_delay_sec)
             (force_settlement_offset_percent)
             (maximum_force_settlement_volume)

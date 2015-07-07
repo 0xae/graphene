@@ -21,14 +21,6 @@
 
 #include <numeric>
 
-// this is for htonl() and ntohl() functions
-// TODO:  write and use FC wrappers for these functions
-#ifndef WIN32
-   #include <arpa/inet.h>
-#else
-   #include <winsock2.h>
-#endif
-
 namespace graphene { namespace chain {
 
    /**
@@ -105,20 +97,8 @@ namespace graphene { namespace chain {
       transaction_id_type id()const;
       void validate() const;
 
-      void set_expiration( fc::time_point_sec expiration_time )
-      {
-         ref_block_num = 0;
-         relative_expiration = 0;
-         ref_block_prefix = expiration_time.sec_since_epoch();
-         block_id_cache.reset();
-      }
-      void set_expiration( const block_id_type& reference_block, unsigned_int lifetime_intervals = 3 )
-      {
-         ref_block_num = ntohl(reference_block._hash[0]);
-         ref_block_prefix = reference_block._hash[1];
-         relative_expiration = lifetime_intervals;
-         block_id_cache = reference_block;
-      }
+      void set_expiration( fc::time_point_sec expiration_time );
+      void set_expiration( const block_id_type& reference_block, unsigned_int lifetime_intervals = 3 );
 
       /// visit all operations
       template<typename Visitor>
@@ -127,6 +107,14 @@ namespace graphene { namespace chain {
          for( auto& op : operations )
             op.visit( std::forward<Visitor>( visitor ) );
       }
+      template<typename Visitor>
+      void visit( Visitor&& visitor )const
+      {
+         for( auto& op : operations )
+            op.visit( std::forward<Visitor>( visitor ) );
+      }
+
+      void get_required_authorities( flat_set<account_id_type>& active, flat_set<account_id_type>& owner, vector<authority>& other );
 
    protected:
       // Intentionally unreflected: does not go on wire
@@ -141,8 +129,9 @@ namespace graphene { namespace chain {
       signed_transaction( const transaction& trx = transaction() )
          : transaction(trx){}
 
-      void sign( key_id_type id, const private_key_type& key );
-      flat_map<key_id_type,signature_type> signatures;
+      void sign( const private_key_type& key );
+
+      vector<signature_type> signatures;
 
       /// Removes all operations and signatures
       void clear() { operations.clear(); signatures.clear(); }
@@ -179,4 +168,3 @@ namespace graphene { namespace chain {
 FC_REFLECT( graphene::chain::transaction, (ref_block_num)(ref_block_prefix)(relative_expiration)(operations) )
 FC_REFLECT_DERIVED( graphene::chain::signed_transaction, (graphene::chain::transaction), (signatures) )
 FC_REFLECT_DERIVED( graphene::chain::processed_transaction, (graphene::chain::signed_transaction), (operation_results) )
-

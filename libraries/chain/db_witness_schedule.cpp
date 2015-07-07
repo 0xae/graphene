@@ -23,9 +23,6 @@
 
 namespace graphene { namespace chain {
 
-static_assert((GRAPHENE_GENESIS_TIMESTAMP % GRAPHENE_DEFAULT_BLOCK_INTERVAL) == 0,
-              "GRAPHENE_GENESIS_TIMESTAMP must be aligned to a block interval.");
-
 pair<witness_id_type, bool> database::get_scheduled_witness(uint32_t slot_num)const
 {
    if( slot_num == 0 )
@@ -106,6 +103,8 @@ void database::update_witness_schedule(signed_block next_block)
    // triggering FC_ASSERT elsewhere
 
    assert( schedule_slot > 0 );
+   witness_id_type first_witness;
+   bool slot_is_near = wso.scheduler.get_slot( schedule_slot-1, first_witness );
 
    witness_id_type wit;
 
@@ -118,14 +117,22 @@ void database::update_witness_schedule(signed_block next_block)
       _wso.slots_since_genesis += schedule_slot;
       witness_scheduler_rng rng(wso.rng_seed.data, _wso.slots_since_genesis);
 
-      _wso.scheduler._min_token_count = gpo.active_witnesses.size() / 2;
-      uint32_t drain = schedule_slot;
-      while( drain > 0 )
+      _wso.scheduler._min_token_count = std::max(int(gpo.active_witnesses.size()) / 2, 1);
+
+      if( slot_is_near )
       {
-         if( _wso.scheduler.size() == 0 )
-            break;
-         _wso.scheduler.consume_schedule();
-         --drain;
+         uint32_t drain = schedule_slot;
+         while( drain > 0 )
+         {
+            if( _wso.scheduler.size() == 0 )
+               break;
+            _wso.scheduler.consume_schedule();
+            --drain;
+         }
+      }
+      else
+      {
+         _wso.scheduler.reset_schedule( first_witness );
       }
       while( !_wso.scheduler.get_slot(schedule_needs_filled, wit) )
       {
