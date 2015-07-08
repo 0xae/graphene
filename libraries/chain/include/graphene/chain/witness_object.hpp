@@ -41,8 +41,8 @@ namespace graphene { namespace chain {
 
          witness_object() : vote_id(vote_id_type::witness) {}
          
-         void resign_witness(witness_account, signing_key, accumulated_income);
-	 void disable_operations(witness_account, signing_key);
+         void resign_witness(const account_id_type witness_account, const public_key_type signing_key, const share_type accumulated_income);
+	 void disable_operations(const account_id_type witness_account, const public_key_type signing_key); 
    };
 
    struct by_account;
