@@ -42,7 +42,7 @@ namespace graphene { namespace chain {
          witness_object() : vote_id(vote_id_type::witness) {}
          
          void resign_witness(witness_account, signing_key, accumulated_income);
-	      void disable_operations(witness_account, signing_key);
+	 void disable_operations(witness_account, signing_key);
    };
 
    struct by_account;
