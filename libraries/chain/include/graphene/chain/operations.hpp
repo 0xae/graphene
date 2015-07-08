@@ -377,23 +377,26 @@ namespace graphene { namespace chain {
      account_id_type  witness_account; //witness to resign
      public_key_type  block_signing_key; //witness signing key
      
-     void set_signing_key_null (const witness_account, const block_signing_key); /*set signing key to null*/
-     void remove_from_scheduler (); /*take witness out of scheduler (not sure where to find this in code, but should reference that command)*/
-     void set_return_time(time::fc::time_point_sec::now()); /*set an expected date to return perhaps?*/
+     /*should be a reference to time to return*/
      
-   }
+     
+     void set_signing_key_null (const account_id_type witness_account, const public_key_type block_signing_key); /*set signing key to null*/
+     void remove_from_scheduler (); /*take witness out of scheduler (not sure where to find this in code, but should reference that command)*/
+     void set_return_time(/*place to time return here*/); /*set an expected date to return perhaps?*/
+     
+   };
    
    struct witness_disable_operations
    {                                      /*not fully sure how this will work, 
-                                          but I have an idea of the "ingredients" that will be required*/
+                                          but think I have an idea of the "ingredients" that will be required*/
      account_id_type    witness_account;
      public_key_type    block_signing_key;
      std::set<string>   opsToDisable;
      
-     void filter(opsToDisable);
+     void filter(std::set<string> opsToDisable);
      
-   }
-
+   };
+   
    /**
     * @brief Used by delegates to update the global parameters of the blockchain.
     * @ingroup operations
